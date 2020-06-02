@@ -150,7 +150,7 @@
     <ClInclude Include="structs.h" />
   </ItemGroup>
   <ItemGroup>
-    <MASM Include="hellsgate.masm">
+    <MASM Include="hellsgate.asm">
       <FileType>Document</FileType>
     </MASM>
   </ItemGroup>
