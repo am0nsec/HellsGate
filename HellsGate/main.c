@@ -7,7 +7,7 @@
 ##
   Authors: 
              Paul Laine (@am0nsec)
-			 smelly__vx (@RtlMateusz)
+             smelly__vx (@RtlMateusz)
 ===================================================================+*/
 #pragma once
 #include <Windows.h>
