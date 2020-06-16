@@ -20,10 +20,4 @@
 		syscall
 		ret
 	HellDescent ENDP
-
-
-	GetPeb PROC
-		mov rax, GS:[60h]
-		ret
-	GetPeb ENDP
 end
